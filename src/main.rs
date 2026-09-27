@@ -10,6 +10,7 @@ use http_wire::WireDecode;
 use http_wire::WireEncode;
 use http_wire::request::FullRequest;
 use http_body_util::Full;
+use log::{error, info};
 
 mod configs;
 use crate::configs::*;
@@ -17,6 +18,7 @@ mod st;
 use crate::st::*;
 mod body_form;
 use crate::body_form::*;
+
 
 
 fn load_javascript_injection(configs: &mut Configs) {
@@ -39,16 +41,27 @@ fn load_javascript_injection(configs: &mut Configs) {
                     .replace("\n", "\r\n")
             )
         );
+
+        if configs.debug_enabled {
+            info!("JS injector configured from file: {}", injector_cloned);
+        }
     } else {
         // string is a link
         configs.js_injector = Some(
             format!("<script  type=\"text/javascript\" src=\"{}\"></script>", &injector_cloned)
         );
+
+        if configs.debug_enabled {
+            info!("JS injector configured with URL: {}", injector_cloned);
+        }
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // init color logger
+    colog::init();
+
     let mut configs = init_configs();
     load_javascript_injection(&mut configs);
 
@@ -59,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut incoming = listener.incoming();
 
-    println!(
+    info!(
         "[ {} ] Proxy server for original resource {} has been started on {}:{}.", 
         get_current_pid(), configs.proxy_to_url, configs.host, configs.port
     );
@@ -170,12 +183,19 @@ fn build_proxy_response(
 
 async fn handle_connection(mut stream: TcpStream, configs: Configs) {
     let client = reqwest::Client::new();
+    let connection_ip = stream.peer_addr().unwrap();
 
     let mut buffer = [0; PACKET_SIZE];
     let gotten_bytes_pack = stream.read(&mut buffer).await;
 
     if let Err(error) = gotten_bytes_pack {
-        eprintln!("Failed to read bytes from client! Error: {}", error);
+        if configs.debug_enabled {
+            error!(
+                "[ {} ] Failed to read bytes from client! Error: {}", 
+                connection_ip, error
+            );
+        }
+
         return;
     }
 
@@ -183,13 +203,20 @@ async fn handle_connection(mut stream: TcpStream, configs: Configs) {
 
     // parsing request
     let mut headers = [httparse::EMPTY_HEADER; EMPTY_HEADERS_COUNT];
-    let (request, _) = match FullRequest::decode(&buffer[..gotten_bytes], &mut headers) {
+    let (request, request_length) = match FullRequest::decode(&buffer[..gotten_bytes], &mut headers) {
         Ok(result) => result,
         Err(e) => {
-            eprintln!("Failed to parse request: {}", e);
+            if configs.debug_enabled {
+                error!(
+                    "[ {} ] Failed to parse request. Error: {}", 
+                    connection_ip, e
+                );
+            }
+
             return;
         }
     };
+
 
     // mapping request and build new one
     // static map for now
@@ -210,4 +237,11 @@ async fn handle_connection(mut stream: TcpStream, configs: Configs) {
 
     stream.write_all(&client_response.encode().unwrap()).await.unwrap();
     stream.flush().await.unwrap();
+
+    if configs.debug_enabled {
+        info!(
+            "[ {} ] Got {} bytes. Connection closed without errors.",
+            connection_ip, request_length
+        );
+    }
 }

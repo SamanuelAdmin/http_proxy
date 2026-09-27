@@ -10,6 +10,14 @@ use clap::{Parser};
 )]
 pub struct Configs {
     #[arg(
+        short = 'd',
+        long = "debug",
+        default_value_t = false,
+        action = clap::ArgAction::Set
+    )]
+    pub debug_enabled: bool,
+
+    #[arg(
         long = "proxy-from-url",
         value_name = "URL"
     )]
