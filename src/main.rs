@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use std::path::Path;
 use std::fs;
 use std::str::FromStr;
 use http::{Response};
@@ -18,20 +19,45 @@ mod body_form;
 use crate::body_form::*;
 
 
+fn load_javascript_injection(configs: &mut Configs) {
+    // loading javascript from different sources 
+    // (sources - link or file)
+    // at the result ready-to-use injection will be in configs
+
+    if !configs.js_injector.is_some() {
+        return;
+    }
+
+    let injector_cloned = &configs.js_injector.clone().unwrap();
+
+    // check if string is a valid file path
+    if Path::new(&injector_cloned).exists() {
+        configs.js_injector = Some(
+            format!("<script type=\"text/javascript\">{}</script>", 
+                fs::read_to_string(&injector_cloned)
+                    .expect("Cannot read JS file for injection.")
+                    .replace("\n", "\r\n")
+            )
+        );
+    } else {
+        // string is a link
+        configs.js_injector = Some(
+            format!("<script  type=\"text/javascript\" src=\"{}\"></script>", &injector_cloned)
+        );
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut configs = init_configs();
+    load_javascript_injection(&mut configs);
+
 
     let listener = TcpListener::bind(
         format!("{}:{}", configs.host, configs.port)
     ).await?;
 
     let mut incoming = listener.incoming();
-
-    if let Some(filepath) = configs.js_injector {
-        configs.js_injector = Some(fs::read_to_string(filepath).expect("Cannot read JS file for injection."));
-    }
 
     println!(
         "[ {} ] Proxy server for original resource {} has been started on {}:{}.", 
@@ -99,16 +125,16 @@ fn build_proxy_response(
     mut body: Bytes, configs: &Configs
 ) -> Result<Response<Full<Bytes>>, http::Error> {
     let mut response = Response::builder().status(status.as_u16());
-    
     let mut last_header_name = String::new();
 
     if configs.enable_formatter {
         formatter(&headers, &mut body, configs);
     } 
 
-    if let Some(jscript) = &configs.js_injector {
-        js_injector(&headers, &mut body, jscript);
+    if configs.js_injector.is_some() {
+        js_injector(&headers, &mut body, configs);
     }
+
 
     for (name, value) in headers {
         let header_name = if let Some(name_unw) = name {
@@ -127,6 +153,16 @@ fn build_proxy_response(
         );
     }
 
+    // CORS hijacking
+    // if enabled - sending "ALL enabled" CORS to the client
+    // to except cross-site origin blocking
+    if configs.cors_hijacking {
+        for (name, value) in get_cors_hijacking_headers() {
+            response = response.header(
+                name, value
+            )
+        }    
+    }
 
     Ok(response.body(Full::new(body)).unwrap())
 }

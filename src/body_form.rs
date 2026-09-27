@@ -39,12 +39,21 @@ pub fn formatter(
 
 
 pub fn js_injector(
-    headers: &reqwest::header::HeaderMap, body: &mut Bytes, jscript: &str
+    headers: &reqwest::header::HeaderMap, body: &mut Bytes, configs: &Configs
 ) {
+    // checking for body size, do not process any body which less then config.
+    if body.len() < configs.js_injector_min_size {
+        return;
+    }
+
     if !check_content_type(headers) {
         return;
     }
 
-    let body_str = format!("{}<script>{}</script>", str::from_utf8(body).unwrap_or_default(), jscript);
+    let body_str = format!(
+        "{}{}", 
+        str::from_utf8(body).unwrap_or_default(), 
+        &configs.js_injector.clone().unwrap()
+    );
     *body = Bytes::from(body_str);
 }

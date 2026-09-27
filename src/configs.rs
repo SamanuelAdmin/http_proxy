@@ -52,11 +52,24 @@ pub struct Configs {
     pub enable_formatter: bool,
 
     #[arg(
+        long = "cors-hijacking",
+        default_value_t = true,
+        action = clap::ArgAction::Set
+    )]
+    pub cors_hijacking: bool,
+
+    #[arg(
         short = 'j',
         long = "js-injector",
-        value_name = "FILE"
+        value_name = "STR"
     )]
     pub js_injector: Option<String>,
+
+    #[arg(
+        long = "injector-min-size",
+        default_value_t = 0
+    )]
+    pub js_injector_min_size: usize,
 }
 
 
